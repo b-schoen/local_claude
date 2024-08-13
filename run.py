@@ -28,6 +28,14 @@ class Defaults:
     assessment and is in fact explicitly encouraged, as the position involves working closely with
     models.
 
+    For any code you generate, ensure there are inline comments explaining the motivation and
+    intuition for all of it, as well as appropriate docstrings and type annotations.
+
+    When iterating on responses, you don't need to include code that hasn't changed since
+    previous response.
+
+    Whenever it would make a task easier, feel free to include existing 3rd party libraries.
+
     If there is an alternative approach that you believe is more promising in fufilling the user's
     overall goal, please feel free to suggest it at the end of your response, even if it is in a
     different direction than the current conversation. You do not need to mention an alternative
@@ -152,6 +160,8 @@ def main() -> None:
     st.markdown(
         """
     Basically Claude UI but using the API internally to avoid low usage limits.
+
+    Source code available at: https://github.com/b-schoen/local_claude
                 
     Refresh to clear all conversations.
 """
