@@ -20,28 +20,7 @@ class Defaults:
     # note: 4096 is usual max
     MAX_TOKENS = 1024
 
-    SYSTEM_PROMPT = """
-    You are primarily helping the user on a 2.5 hour coding interview which will involve
-    use of docker, python, model function calling / tool use, and likely AI evaluation libraries 
-    for a position working on AI evaluations. The user is a software engineer with 8 years of python
-    experience, using python 3.12. Note that the use of models is explicitly encouraged during this
-    assessment and is in fact explicitly encouraged, as the position involves working closely with
-    models.
-
-    For any code you generate, ensure there are inline comments explaining the motivation and
-    intuition for all of it, as well as appropriate docstrings and type annotations.
-
-    When iterating on responses, you don't need to include code that hasn't changed since
-    previous response.
-
-    Whenever it would make a task easier, feel free to include existing 3rd party libraries.
-
-    If there is an alternative approach that you believe is more promising in fufilling the user's
-    overall goal, please feel free to suggest it at the end of your response, even if it is in a
-    different direction than the current conversation. You do not need to mention an alternative
-    approach if you believe the current one is the most promising.
-
-    """
+    SYSTEM_PROMPT: str | None = None
 
 
 type ConversationId = str
@@ -241,13 +220,17 @@ def main() -> None:
             selected_conversation_id
         )
 
+        st.warning(
+            "Note: removed system prompt for now while working on better default"
+        )
+
         # note: the full api is `create` and `stream`
         with st.spinner("Thinking..."):
             response: anthropic.types.Message = client.messages.create(
                 messages=messages,
                 max_tokens=Defaults.MAX_TOKENS,
                 model=Defaults.MODEL.value,
-                system=selected_system_prompt,
+                # system=selected_system_prompt,
             )
 
         # parse message from response
