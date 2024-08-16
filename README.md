@@ -7,6 +7,8 @@ We also give Claude some additional tool use, like:
  * (containerized) bash execution
  * (containerized) python execution 
 
+> [!NOTE] Containerization itself is under heavy iteration, as we're playing with different designs here
+
 Each session uses a persistent (for the duration of the session):
  * container
  * directory within that container

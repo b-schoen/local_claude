@@ -37,6 +37,7 @@ def python_type_to_json_schema[T](typ: Type[T]) -> ToolUseInputArgument:
 
 # TODO(bschoen): Add `Literal` support / translating enums.`
 # TODO(bschoen): Cap description at max size / check error
+# TODO(bschoen): What you eventually probably want is some kind of intermediate format.
 def generate_json_schema_for_function[
     R
 ](func: Callable[..., R]) -> anthropic.types.ToolParam:
