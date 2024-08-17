@@ -21,6 +21,7 @@ class Defaults:
     MAX_TOKENS = 1024
 
     # TODO(bschoen): Provide `environment` tags?
+    # TODO(bschoen): A bunch of examples for what's possible with the tools
     SYSTEM_PROMPT: str = """
     You are an AI assistant helping a user. You are provided with a containerized,
     sandboxed environment in which you can make arbitrary modifications safely. The
@@ -56,7 +57,8 @@ class Defaults:
 
     <available_tools>
 
-
+    - `execute_python_code_and_write_python_code_to_file`: Executes python code and writes it to a file
+    - `execute_bash_command`: Executes a bash command and returns the output
 
     </available_tools>
 

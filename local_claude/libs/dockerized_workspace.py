@@ -8,6 +8,11 @@ import docker
 # TODO(bschoen): Other tools could have arbitrary state, so as cool as the function call handler thing is, probably need to throw it away.
 #                this probably needs to take in context manager tools and adapt them
 # Note: If these act as command line applications (as an abstraction) will be tricky to manage state
+# TODO(bschoen): Probably want a couple of different adapters.
+# TODO(bschoen): We want the lightweight ones to play with them, but the containerized ones separately.
+# TODO(bschoen): Speed of tool use probably isn't a limiting factor in compute by an order of magnitude, but may need to reuse something like a connection
+# TODO(bschoen): Tools should probably be able to take in something like a docker container on context enter so can be shared between tools, same as other connections, but don't *HAVE* to
+# TODO(bschoen): Tools should take a container provider on construction, that way they all have the same `__enter__` signature so a wrapping context manager doesn't have to know how to call `__enter__``
 class DockerizedWorkspace:
     """Dockerized workspace for things which need sandboxing like code execution.
 
