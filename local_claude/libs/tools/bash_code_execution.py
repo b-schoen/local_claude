@@ -11,6 +11,9 @@ class BashCommandResult:
     output: str  # note: we don't separate stdout and sterr since docker doesn't when streaming
 
 
+# TODO(bschoen): We actually do want to throw exceptions for this and the python one,
+#                since that's a generic way for function handler to communicate to claude that there
+#                was an error.
 # TODO(bschoen): Common higher level abstraction args like `timeout_in_seconds` are really a property of the workspace, but do I want a shared class here with them?`
 def execute_bash_command(command: str) -> str:
     """A tool that executes a bash command in a persistent bash shell and returns the output.
