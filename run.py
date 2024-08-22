@@ -2,8 +2,9 @@ import streamlit as st
 import anthropic
 
 import datetime
-from typing import Self
+from typing import Iterable
 import enum
+import json
 
 import coolname
 import pytz
@@ -156,51 +157,64 @@ class ConversationManager:
         return conversation_id
 
 
+MessageContent = (
+    str
+    | Iterable[
+        anthropic.types.TextBlockParam
+        | anthropic.types.ImageBlockParam
+        | anthropic.types.ToolUseBlockParam
+        | anthropic.types.ToolResultBlockParam
+        | anthropic.types.ContentBlock
+    ]
+)
+
+
+def display_message_content(message_content: MessageContent) -> None:
+
+    if isinstance(message_content, str):
+        st.markdown(message_content)
+        return None
+
+    # recursively handle list
+    if isinstance(message_content, list):
+        for item in message_content:
+            display_message_content(item)
+        return None
+
+    # each item is
+    # WOW match with copilot is crazy
+    match message_content["type"]:
+        case "text":
+            st.markdown(message_content["text"])
+            return None
+        case "image":
+            st.image(message_content["source"]["data"])
+            return None
+        case "tool_use":
+            st.markdown(f"Tool use: {message_content['id']}")
+            st.markdown(f"```json\n{json.dumps(message_content, indent=2)}\n```")
+            return None
+        case "tool_result":
+            st.markdown(f"Tool result: {message_content['tool_use_id']}")
+            return None
+        case "content":
+            st.markdown(f"Content: {message_content['name']}")
+            return None
+        case _:
+            raise ValueError(f"Unexpected item type: {message_content['type']}")
+
+
 def display_message(message: anthropic.types.MessageParam) -> None:
+    """
+
+    Annoyingly, this operates on `MessageParam` instead of `Message`, since `UserMessage`s aren't actually a legitimate
+    `Message` instance, at least we still have the type checking of `TypedDict`.
+
+    """
+
     with st.chat_message(message["role"]):
 
-        content = message["content"]
-
-        # handle displaying just plain string
-        if isinstance(content, str):
-            st.markdown(content)
-            return None
-
-        if isinstance(content, anthropic.types.TextBlock):
-            st.markdown(content.text)
-            return None
-
-        # handle list from model, content is either string or one of these types:
-        # - anthropic.types.TextBlockParam
-        # - anthropic.types.ImageBlockParam
-        # - anthropic.types.ToolUseBlockParam
-        # - anthropic.types.ToolResultBlockParam
-        # - anthropic.types.ContentBlock
-        if isinstance(content, list):
-
-            for item in content:
-
-                # each item is
-                # WOW match with copilot is crazy
-                match item.type:
-                    case "text":
-                        st.markdown(item.text)
-                    case "image":
-                        st.image(item.source.data)
-                    case "tool_use":
-                        st.markdown(f"Tool use: {item.name}")
-                    case "tool_result":
-                        st.markdown(f"Tool result: {item.name}")
-                    case "content":
-                        st.markdown(f"Content: {item.name}")
-                    case _:
-                        raise ValueError(f"Unexpected item type: {item.type}")
-
-            # return once we're done displaying all tiems
-            return None
-
-        # handle case where we got a dict back or something
-        raise ValueError(f"Unexpected content type: {content}")
+        display_message_content(message["content"])
 
 
 def main() -> None:
@@ -301,12 +315,16 @@ def main() -> None:
             selected_conversation_id
         )
 
+        is_show_messages_between_tool_use_enabled = st.sidebar.checkbox(
+            "Show messages between tool use (for debugging)"
+        )
+
         max_iterations = 5
 
         for iteration_count in range(max_iterations):
 
-            st.write("Showing messages for debug")
-            st.write(messages)
+            if is_show_messages_between_tool_use_enabled:
+                st.write(messages)
 
             # note: the full api is `create` and `stream`
             with st.spinner("Thinking..."):
@@ -319,11 +337,8 @@ def main() -> None:
                     tools=function_call_handler.get_schema_for_tools_arg(),
                 )
 
-            # TODO(bschoen): Why are we mixing dict and pydantic types?
-            response_message = {
-                "role": response.role,
-                "content": response.content,
-            }
+            # note: using dict representation for consistency with user_message + it's what API expects
+            response_message = response.model_dump(include=["role", "content"])
 
             # display agent message
             display_message(response_message)
@@ -336,13 +351,14 @@ def main() -> None:
 
                 if response_block.type == "tool_use":
 
+                    # TODO(bschoen): If multiple tools probably want to consolidate that in one user message
                     tool_result = function_call_handler.resolve(
                         tool_call=response_block
                     )
 
                     tool_result_message: anthropic.types.MessageParam = {
                         "role": "user",
-                        "content": tool_result,
+                        "content": [tool_result],
                     }
 
                     conversation_manager.add_conversation_message(

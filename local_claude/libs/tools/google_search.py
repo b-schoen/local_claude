@@ -53,7 +53,8 @@ class SearchResult:
 
 # TODO(bschoen): Just have a wrapper that does this dict conversion, since it loses so much information (or just have internal underscore function, but that can be confusing to users)
 # TODO(bschoen): Mention in description that often used with visit url in browser tool
-# TODO(bschoen): We can actually return a list to claude
+# TODO(bschoen): We can actually return a list to claude, but it has to be a content block thing
+# TODO(bschoen): We can return images here, so can give it screenshots?
 def search_google_and_return_list_of_results(search_query: str) -> str:
     """
     Search Google and return the first page of results.
