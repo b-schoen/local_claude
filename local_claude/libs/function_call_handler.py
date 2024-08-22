@@ -83,10 +83,12 @@ class FunctionCallHandler:
 
         try:
             function_result = self._resolve_function_call(tool_call=tool_call)
+            function_result = str(function_result)
             is_error = False
         except Exception as e:
             # on exception, convert to string so the model can handle it
             function_result = _exception_to_json_dict(e)
+            function_result = json.dumps(function_result, indent=2)
             is_error = True
 
         # TODO(bschoen): Why does the example include labeled outputs?

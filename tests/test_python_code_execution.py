@@ -5,6 +5,7 @@ import json
 
 from local_claude.libs.tools.python_code_execution import (
     execute_python_code_and_write_python_code_to_file,
+    DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY,
 )
 from local_claude.libs.tools.bash_code_execution import BashCommandResult
 from local_claude.libs.directory_utils import temporary_working_directory
@@ -21,6 +22,12 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
 
         filename_for_given_python_code = tmp_dir + "/test_file.py"
 
+        # actual filepath used
+        filepath_used_for_python_code = filename_for_given_python_code.replace(
+            "/test_file.py",
+            f"/{DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY}/test_file.py",
+        )
+
         result_json = execute_python_code_and_write_python_code_to_file(
             python_code_to_execute=python_code_to_execute,
             filename_for_given_python_code=filename_for_given_python_code,
@@ -29,12 +36,12 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
         result = BashCommandResult(**json.loads(result_json))
 
         # check we used the file to execute the python code
-        assert result.command == "python " + filename_for_given_python_code
+        assert result.command == "python " + filepath_used_for_python_code
         assert result.exit_code == 0
         assert result.output == "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"
 
         # check `filename_for_given_python_code` now contains `python_code_to_execute`
-        with open(filename_for_given_python_code, "r") as file:
+        with open(filepath_used_for_python_code, "r") as file:
             file_contents = file.read()
 
         assert file_contents.strip() == python_code_to_execute.strip()

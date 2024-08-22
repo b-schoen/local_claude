@@ -1,8 +1,11 @@
 import subprocess
+import pathlib
 
 from local_claude.libs.tools.bash_code_execution import (
     execute_bash_command,
 )
+
+DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY = pathlib.Path("model_workspace")
 
 
 # TODO(bschoen): We use a non-temporary file because:
@@ -39,7 +42,22 @@ def execute_python_code_and_write_python_code_to_file(
     """
     # TODO(bschoen): Does this specifically matter vs just giving an example
     #                using the bash tool?
-    with open(filename_for_given_python_code, "wt") as file:
+
+    # note: we do everything in a `model_workspace` directory as a poor man's sandboxing
+    directory = DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY
+    directory.mkdir(exist_ok=True)
+
+    original_filepath = pathlib.Path(filename_for_given_python_code)
+
+    # ex: `/foo/bar.py` -> `/foo/model_workspace/bar.py`
+    filepath = str(original_filepath).replace(
+        str(original_filepath.stem),
+        str(directory / original_filepath.stem),
+    )
+
+    print(f"Writing python code to file: {filepath}")
+
+    with open(filepath, "wt") as file:
         file.write(python_code_to_execute)
 
-    return execute_bash_command(command=f"python {filename_for_given_python_code}")
+    return execute_bash_command(command=f"python {filepath}")
