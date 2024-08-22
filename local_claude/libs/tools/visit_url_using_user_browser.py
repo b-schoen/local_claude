@@ -77,12 +77,17 @@ def _extract_text_content(html: str) -> str:
 # TODO(bschoen): Full description
 def open_url_with_users_local_browser_and_get_all_content_as_html(url: str) -> str:
     """
+    Open url with user's local browser and get all content as html.
+
+    Use this whenever you want to visit a link. This is especially useful
+    when used on the results of the `search_google_and_return_list_of_results`, as
+    it can get the content of the `link` field.
+
+    Together with `search_google_and_return_list_of_results`, these two tools allow
+    you to browse the web just like a human would, an incredibly powerful tool.
 
     Args:
-        url (str): _description_
-
-    Returns:
-        str: _description_
+        url (str): URL to open in the user's browser.
     """
     page_content = _get_safari_content(url=url)
 

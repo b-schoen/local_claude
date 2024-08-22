@@ -58,7 +58,9 @@ def search_google_and_return_list_of_results(search_query: str) -> str:
     """
     Search Google and return the first page of results.
 
-    Useful any time the user needs information from the web.
+    Useful any time the user needs information from the web. You will usually need to use
+    `open_url_with_users_local_browser_and_get_all_content_as_html` on the `link` field of
+    whatever result you want.
 
     Returns a list of dictionary objects, each representing a search result.
 

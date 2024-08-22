@@ -8,6 +8,21 @@ import enum
 import coolname
 import pytz
 
+# import function call handler
+from local_claude.libs.function_call_handler import FunctionCallHandler
+
+# import tools
+from local_claude.libs.tools.bash_code_execution import execute_bash_command
+from local_claude.libs.tools.python_code_execution import (
+    execute_python_code_and_write_python_code_to_file,
+)
+from local_claude.libs.tools.google_search import (
+    search_google_and_return_list_of_results,
+)
+from local_claude.libs.tools.visit_url_using_user_browser import (
+    open_url_with_users_local_browser_and_get_all_content_as_html,
+)
+
 
 class Models(enum.Enum):
     CLAUDE_SONNET_3_5 = "claude-3-5-sonnet-20240620"
@@ -22,12 +37,17 @@ class Defaults:
 
     # TODO(bschoen): Provide `environment` tags?
     # TODO(bschoen): A bunch of examples for what's possible with the tools
+    # TODO(bschoen): Chaining them together
     SYSTEM_PROMPT: str = """
     You are an AI assistant helping a user. You are provided with a containerized,
     sandboxed environment in which you can make arbitrary modifications safely. The
     containerized, sandboxed environment is persistent across calls. You are free
     to add, create, remove, or modify any files, as your access is already constrained
     to a sandboxed working directory.
+
+    Note that the availability of these tools does not mean you have to use them in every response.
+    If you are confident you can answer the user's question without using any of the tools, feel free
+    to answer without using the tools.
 
     For any code you generate, ensure there are inline comments explaining the motivation and
     intuition for all of it, as well as appropriate docstrings and type annotations.
@@ -59,6 +79,8 @@ class Defaults:
 
     - `execute_python_code_and_write_python_code_to_file`: Executes python code and writes it to a file
     - `execute_bash_command`: Executes a bash command and returns the output
+    - `search_google_and_return_list_of_results`: Searches google and returns the results
+    - `open_url_with_users_local_browser_and_get_all_content_as_html`: Opens a URL in the user's local browser and returns the HTML content
 
     </available_tools>
 
@@ -123,6 +145,7 @@ class ConversationManager:
         conversation_id: ConversationId,
         message: anthropic.types.MessageParam,
     ) -> None:
+        print(f"Adding message to dict: {message}")
         st.session_state.conversations[conversation_id].append(message)
 
     def create_new_conversation(self) -> ConversationId:
@@ -141,6 +164,10 @@ def display_message(message: anthropic.types.MessageParam) -> None:
         # handle displaying just plain string
         if isinstance(content, str):
             st.markdown(content)
+            return None
+
+        if isinstance(content, anthropic.types.TextBlock):
+            st.markdown(content.text)
             return None
 
         # handle list from model, content is either string or one of these types:
@@ -235,6 +262,16 @@ def main() -> None:
     ):
         display_message(message)
 
+    # create the function call handler
+    function_call_handler = FunctionCallHandler(
+        functions=[
+            execute_bash_command,
+            execute_python_code_and_write_python_code_to_file,
+            search_google_and_return_list_of_results,
+            open_url_with_users_local_browser_and_get_all_content_as_html,
+        ]
+    )
+
     # only run if new user input
     if user_message_content := st.chat_input("What is your message?"):
 
@@ -245,10 +282,10 @@ def main() -> None:
         # note: defaults to getting ANTHROPIC_API_KEY from environment
         client = anthropic.Anthropic()
 
-        user_message: anthropic.types.MessageParam = {
-            "role": "user",
-            "content": user_message_content,
-        }
+        user_message: anthropic.types.MessageParam = anthropic.types.MessageParam(
+            role="user",
+            content=user_message_content,
+        )
 
         # add user message to message history
         conversation_manager.add_conversation_message(
@@ -264,33 +301,70 @@ def main() -> None:
             selected_conversation_id
         )
 
-        st.warning(
-            "Note: removed system prompt for now while working on better default"
-        )
+        max_iterations = 5
 
-        # note: the full api is `create` and `stream`
-        with st.spinner("Thinking..."):
-            response: anthropic.types.Message = client.messages.create(
-                messages=messages,
-                max_tokens=Defaults.MAX_TOKENS,
-                model=Defaults.MODEL.value,
-                system=selected_system_prompt,
-            )
+        for iteration_count in range(max_iterations):
 
-        # parse message from response
-        agent_message: anthropic.types.MessageParam = {
-            "role": response.role,
-            "content": response.content,
-        }
+            st.write("Showing messages for debug")
+            st.write(messages)
 
-        # add it to message history
-        conversation_manager.add_conversation_message(
-            selected_conversation_id,
-            agent_message,
-        )
+            # note: the full api is `create` and `stream`
+            with st.spinner("Thinking..."):
+                response: anthropic.types.Message = client.messages.create(
+                    messages=messages,
+                    max_tokens=Defaults.MAX_TOKENS,
+                    model=Defaults.MODEL.value,
+                    # TODO(bschoen): Caching here
+                    system=selected_system_prompt,
+                    tools=function_call_handler.get_schema_for_tools_arg(),
+                )
 
-        # display agent message
-        display_message(agent_message)
+            # TODO(bschoen): Why are we mixing dict and pydantic types?
+            response_message = {
+                "role": response.role,
+                "content": response.content,
+            }
+
+            # display agent message
+            display_message(response_message)
+
+            # add response to message history
+            messages.append(response_message)
+
+            # handle tool use
+            for response_block in response.content:
+
+                if response_block.type == "tool_use":
+
+                    tool_result = function_call_handler.resolve(
+                        tool_call=response_block
+                    )
+
+                    tool_result_message: anthropic.types.MessageParam = {
+                        "role": "user",
+                        "content": tool_result,
+                    }
+
+                    conversation_manager.add_conversation_message(
+                        selected_conversation_id,
+                        tool_result_message,
+                    )
+
+                elif response_block.type == "text":
+
+                    print("Got text message.")
+
+                else:
+                    raise ValueError(
+                        f"Unexpected response block type: {response_block.type} in {response_block}"
+                    )
+
+            # if no more tool use, break
+            if not any(block.type == "tool_use" for block in response.content):
+                print("No more tool use, breaking")
+                break
+
+        # TODO(bschoen): Error for max iterations
 
 
 if __name__ == "__main__":
