@@ -85,6 +85,23 @@ class Defaults:
 
     </available_tools>
 
+    <example_multi_step_tool_use>
+
+    search_results = search_google_and_return_list_of_results("How does AutoGPT4 work")
+
+    # call `open_url_with_users_local_browser_and_get_all_content_as_html` on the interesting links,
+    # here we're arbitrarily choosing 0 and 3 for this example
+    interesting_links = [search_results[0]["link"], search_results[3]["link"]]
+
+    content_of_interesting_links = [
+        open_url_with_users_local_browser_and_get_all_content_as_html(interesting_link)
+        for interesting_link in interesting_links
+    ]
+
+    # now use `content_of_interesting_links` to help you provide an answer to the user
+
+    </example_multi_step_tool_use>
+
     """
 
 
@@ -169,6 +186,13 @@ MessageContent = (
 )
 
 
+def try_load_json_or_default_to_string(json_string: str) -> str:
+    try:
+        return json.loads(json_string)
+    except json.JSONDecodeError:
+        return json_string
+
+
 def display_message_content(message_content: MessageContent) -> None:
 
     if isinstance(message_content, str):
@@ -196,6 +220,42 @@ def display_message_content(message_content: MessageContent) -> None:
             return None
         case "tool_result":
             st.markdown(f"Tool result: {message_content['tool_use_id']}")
+
+            # show details for error
+            if message_content["is_error"]:
+
+                # in this case, we know it should be a JSON dict representing a python exception
+                exception_dict = json.loads(message_content["content"])
+                st.code(exception_dict["traceback"])
+
+            # otherwise show content, up to a limit
+            else:
+
+                # TODO(bschoen): Handle when this is just a string
+
+                # if it's a json, show that
+                function_result = try_load_json_or_default_to_string(
+                    message_content["content"]
+                )
+
+                if isinstance(function_result, str):
+
+                    st.code(
+                        function_result[:100].strip()
+                        + "... (only showing up to first 100 characters)"
+                    )
+
+                # otherwise json decode was successful
+                else:
+                    st.markdown(
+                        f"```json\n{json.dumps(function_result, indent=2)}\n```"
+                    )
+
+                    # TODO(bschoen): How to make this more generic?
+                    if "output" in function_result:
+
+                        st.code(function_result["output"])
+
             return None
         case "content":
             st.markdown(f"Content: {message_content['name']}")
@@ -346,38 +406,48 @@ def main() -> None:
             # add response to message history
             messages.append(response_message)
 
-            # handle tool use
-            for response_block in response.content:
+            if any(block.type == "tool_use" for block in response.content):
 
-                if response_block.type == "tool_use":
+                # collect tool results, as they all need to go in a single message
+                tool_results: anthropic.types.ToolResultBlockParam = []
 
-                    # TODO(bschoen): If multiple tools probably want to consolidate that in one user message
-                    tool_result = function_call_handler.resolve(
-                        tool_call=response_block
-                    )
+                # handle tool use
+                for response_block in response.content:
 
-                    tool_result_message: anthropic.types.MessageParam = {
-                        "role": "user",
-                        "content": [tool_result],
-                    }
+                    if response_block.type == "tool_use":
 
-                    conversation_manager.add_conversation_message(
-                        selected_conversation_id,
-                        tool_result_message,
-                    )
+                        tool_result = function_call_handler.resolve(
+                            tool_call=response_block
+                        )
 
-                elif response_block.type == "text":
+                        tool_results.append(tool_result)
 
-                    print("Got text message.")
+                    elif response_block.type == "text":
 
-                else:
-                    raise ValueError(
-                        f"Unexpected response block type: {response_block.type} in {response_block}"
-                    )
+                        print("Got text message.")
+
+                    else:
+                        raise ValueError(
+                            f"Unexpected response block type: {response_block.type} in {response_block}"
+                        )
+
+                tool_result_message: anthropic.types.MessageParam = {
+                    "role": "user",
+                    "content": tool_results,
+                }
+
+                conversation_manager.add_conversation_message(
+                    selected_conversation_id,
+                    tool_result_message,
+                )
+
+                display_message(response_message)
 
             # if no more tool use, break
-            if not any(block.type == "tool_use" for block in response.content):
+            else:
+
                 print("No more tool use, breaking")
+
                 break
 
         # TODO(bschoen): Error for max iterations

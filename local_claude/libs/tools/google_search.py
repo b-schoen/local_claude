@@ -47,8 +47,10 @@ class SearchResult:
     link: str
     displayed_link: str
     snippet: str
-    snippet_highlighted_words: list[str]
     source: str
+
+    # note: this is optional
+    snippet_highlighted_words: list[str] = dataclasses.field(default_factory=list)
 
 
 # TODO(bschoen): Just have a wrapper that does this dict conversion, since it loses so much information (or just have internal underscore function, but that can be confusing to users)
