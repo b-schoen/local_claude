@@ -1,6 +1,8 @@
 import subprocess
 import re
 
+import bs4
+
 from local_claude.libs.tools.save_to_workspace_file import (
     save_content_to_persistent_file_in_workspace,
 )
@@ -67,16 +69,34 @@ def _get_safari_content(url: str, max_wait: int = 30, check_interval: int = 1) -
     return _run_applescript(script)
 
 
-def _extract_text_content(html: str) -> str:
+def __extract_text_content(html: str) -> str:
+    # Parse the HTML using BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
 
     # Remove script and style elements
-    script_style_regex = re.compile("<(script|style).*?</\\1>|<[^>]+>", re.DOTALL)
-    text = re.sub(script_style_regex, "", html)
+    for script in soup(["script", "style"]):
+        script.decompose()
+
+    # Get text from paragraph elements
+    paragraphs = soup.find_all("p")
+    text_content = []
+
+    for p in paragraphs:
+        # Process links within paragraphs
+        for a in p.find_all("a"):
+            href = a.get("href")
+            if href:
+                a.replace_with(f"{a.get_text()} [{href}]")
+
+        text_content.append(p.get_text())
+
+    # Join the paragraphs with newlines
+    text = "\n\n".join(text_content)
 
     return text.strip()
 
 
-def _collapse_whitespace(text: str) -> str:
+def __collapse_whitespace(text: str) -> str:
     """
     Replace any combination of newlines and tabs with a single newline,
     collapse multiple spaces into a single space, and strip leading/trailing whitespace.
@@ -104,6 +124,39 @@ def _collapse_whitespace(text: str) -> str:
 
     # Strip leading and trailing whitespace
     return text.strip()
+
+
+def _extract_text_content(html: str) -> str:
+    # Parse the HTML using BeautifulSoup
+    soup = bs4.BeautifulSoup(html, "html.parser")
+
+    # Remove script and style elements
+    for element in soup(["script", "style"]):
+        element.decompose()
+
+    # Remove comments
+    for comment in soup.find_all(text=lambda text: isinstance(text, bs4.Comment)):
+        comment.extract()
+
+    # Convert the modified soup back to a string
+    clean_html = str(soup)
+
+    return clean_html.strip()
+
+
+def _collapse_whitespace(html: str) -> str:
+    """
+    Collapse multiple whitespace characters within HTML tags to a single space,
+    and standardize newlines between tags.
+    """
+    # Collapse whitespace within tags
+    html = re.sub(r">(\s+)<", "> <", html)
+
+    # Standardize newlines between tags
+    html = re.sub(r">\s*\n+\s*<", ">\n<", html)
+
+    # Remove leading and trailing whitespace
+    return html.strip()
 
 
 # TODO(bschoen): Full description

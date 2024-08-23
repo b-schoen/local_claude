@@ -24,8 +24,8 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
 
         # actual filepath used
         filepath_used_for_python_code = filename_for_given_python_code.replace(
-            "/test_file.py",
-            f"/{constants.DEFAULT_MODEL_WORKSPACE_DIRECTORY}/test_file.py",
+            "test_file.py",
+            f"{constants.DEFAULT_MODEL_WORKSPACE_DIRECTORY}/test_file.py",
         )
 
         result_json = execute_python_code_and_write_python_code_to_file(
@@ -36,7 +36,7 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
         result = BashCommandResult(**json.loads(result_json))
 
         # check we used the file to execute the python code
-        assert result.command == "python " + filepath_used_for_python_code
+        assert result.command == "python " + filename_for_given_python_code
         assert result.exit_code == 0
         assert result.output == "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"
 
