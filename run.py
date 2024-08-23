@@ -356,10 +356,17 @@ def main() -> None:
         # note: defaults to getting ANTHROPIC_API_KEY from environment
         client = anthropic.Anthropic()
 
-        user_message: anthropic.types.MessageParam = anthropic.types.MessageParam(
-            role="user",
-            content=user_message_content,
-        )
+        user_message: anthropic.types.MessageParam = {
+            "role": "user",
+            "content": [
+                {
+                    "type": "text",
+                    "text": user_message_content,
+                    # use caching (note: applies to whole message + tools + system prompt)
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+        }
 
         # add user message to message history
         conversation_manager.add_conversation_message(
@@ -379,7 +386,16 @@ def main() -> None:
             "Show messages between tool use (for debugging)"
         )
 
-        max_iterations = 5
+        st.sidebar.markdown(
+            "Number of independent iterations of tool use to allow per "
+            "user input. We limit this to avoid execessive actions."
+        )
+        max_iterations = st.sidebar.number_input(
+            "Max iterations without user input",
+            min_value=1,
+            max_value=20,
+            value=10,
+        )
 
         for iteration_count in range(max_iterations):
 
@@ -392,10 +408,13 @@ def main() -> None:
                     messages=messages,
                     max_tokens=Defaults.MAX_TOKENS,
                     model=Defaults.MODEL.value,
-                    # TODO(bschoen): Caching here
                     system=selected_system_prompt,
                     tools=function_call_handler.get_schema_for_tools_arg(),
+                    # needed for caching
+                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
                 )
+
+            print(f"Response: {response.model_dump_json(indent=2)}")
 
             # note: using dict representation for consistency with user_message + it's what API expects
             response_message = response.model_dump(include=["role", "content"])
@@ -451,6 +470,7 @@ def main() -> None:
                 break
 
         # TODO(bschoen): Error for max iterations
+        st.warning("Reached max iterations")
 
 
 if __name__ == "__main__":
