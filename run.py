@@ -13,6 +13,9 @@ import pytz
 from local_claude.libs.function_call_handler import FunctionCallHandler
 
 # import tools
+from local_claude.libs.tools.save_to_workspace_file import (
+    save_content_to_persistent_file_in_workspace,
+)
 from local_claude.libs.tools.bash_code_execution import execute_bash_command
 from local_claude.libs.tools.python_code_execution import (
     execute_python_code_and_write_python_code_to_file,
@@ -78,12 +81,33 @@ class Defaults:
 
     <available_tools>
 
+    - `save_content_to_persistent_file_in_workspace`: Save content to a persistent file in the workspace, useful for passing data to other tools
     - `execute_python_code_and_write_python_code_to_file`: Executes python code and writes it to a file
     - `execute_bash_command`: Executes a bash command and returns the output
     - `search_google_and_return_list_of_results`: Searches google and returns the results
     - `open_url_with_users_local_browser_and_get_all_content_as_html`: Opens a URL in the user's local browser and returns the HTML content
 
     </available_tools>
+
+    Here is a multi step example of:
+    - (1) Getting HTML content of a url via `open_url_with_users_local_browser_and_get_all_content_as_html`
+    - (2) Using python to parse desired information from the HTML content
+
+    <example_multi_step_tool_use>
+
+    html_content = open_url_with_users_local_browser_and_get_all_content_as_html("https://pypi.org/project/anthropic")
+
+    execute_python_code_and_write_python_code_to_file(f'''
+        import 
+
+        html_content
+    ''')
+
+    </example_multi_step_tool_use>
+
+    Here is a multi step example of:
+    - (1) Getting the results from a google search via `search_google_and_return_list_of_results`
+    - (2) Using the links from those results with `open_url_with_users_local_browser_and_get_all_content_as_html` to get more detailed information to more helpfully respond to the user's query
 
     <example_multi_step_tool_use>
 
@@ -277,6 +301,7 @@ def display_message(message: anthropic.types.MessageParam) -> None:
         display_message_content(message["content"])
 
 
+# TODO(bschoen): Should we make all tools read and write from files, like kubeflow?
 def main() -> None:
 
     st.title("Claude UI at home")
@@ -339,11 +364,28 @@ def main() -> None:
     # create the function call handler
     function_call_handler = FunctionCallHandler(
         functions=[
+            save_content_to_persistent_file_in_workspace,
             execute_bash_command,
             execute_python_code_and_write_python_code_to_file,
             search_google_and_return_list_of_results,
             open_url_with_users_local_browser_and_get_all_content_as_html,
         ]
+    )
+
+    # show settings even if no user input yet
+    is_show_messages_between_tool_use_enabled = st.sidebar.checkbox(
+        "Show messages between tool use (for debugging)"
+    )
+
+    st.sidebar.markdown(
+        "Number of independent iterations of tool use to allow per "
+        "user input. We limit this to avoid execessive actions."
+    )
+    max_iterations = st.sidebar.number_input(
+        "Max iterations without user input",
+        min_value=1,
+        max_value=10,
+        value=10,
     )
 
     # only run if new user input
@@ -380,21 +422,6 @@ def main() -> None:
         # retrieve history to send to client
         messages = conversation_manager.get_conversation_messages(
             selected_conversation_id
-        )
-
-        is_show_messages_between_tool_use_enabled = st.sidebar.checkbox(
-            "Show messages between tool use (for debugging)"
-        )
-
-        st.sidebar.markdown(
-            "Number of independent iterations of tool use to allow per "
-            "user input. We limit this to avoid execessive actions."
-        )
-        max_iterations = st.sidebar.number_input(
-            "Max iterations without user input",
-            min_value=1,
-            max_value=20,
-            value=10,
         )
 
         for iteration_count in range(max_iterations):
@@ -460,14 +487,15 @@ def main() -> None:
                     tool_result_message,
                 )
 
-                display_message(response_message)
+                display_message(tool_result_message)
 
             # if no more tool use, break
             else:
 
                 print("No more tool use, breaking")
 
-                break
+                # return, so we don't show the max iterations warning message when it doesn't apply
+                return None
 
         # TODO(bschoen): Error for max iterations
         st.warning("Reached max iterations")

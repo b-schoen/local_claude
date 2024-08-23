@@ -2,6 +2,9 @@ import subprocess
 import dataclasses
 import json
 import os
+import pathlib
+
+from local_claude.libs import directory_utils
 
 
 @dataclasses.dataclass(frozen=True)
@@ -44,6 +47,13 @@ def execute_bash_command(command: str) -> str:
     #
     DEFAULT_TIMEOUT_IN_SECONDS = 60.0
 
+    # execute everything inside of model_workspace directory
+    current_working_directory = directory_utils.get_current_model_workspace_directory()
+
+    print(
+        f"Using model workspace: {current_working_directory} for `execute_bash_command`..."
+    )
+
     result: subprocess.CompletedProcess = subprocess.run(
         command,
         text=True,
@@ -52,6 +62,7 @@ def execute_bash_command(command: str) -> str:
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         shell=True,
+        cwd=current_working_directory,
     )
 
     # convert result to json dict

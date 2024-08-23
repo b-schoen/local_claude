@@ -1,7 +1,9 @@
 import subprocess
-from typing import Any
-import json
 import re
+
+from local_claude.libs.tools.save_to_workspace_file import (
+    save_content_to_persistent_file_in_workspace,
+)
 
 
 class AppleScriptError(Exception):
@@ -74,8 +76,41 @@ def _extract_text_content(html: str) -> str:
     return text.strip()
 
 
+def _collapse_whitespace(text: str) -> str:
+    """
+    Replace any combination of newlines and tabs with a single newline,
+    collapse multiple spaces into a single space, and strip leading/trailing whitespace.
+
+    Args:
+    text (str): The input text to process.
+
+    Returns:
+    str: The processed text with collapsed whitespaces and standardized newlines.
+    """
+    # Replace any combination of newlines and tabs with a single newline
+    text = re.sub(r"[\n\t]+", "\n", text)
+
+    # Collapse multiple spaces into a single space
+    text = re.sub(r" +", " ", text)
+
+    # Replace tabs with spaces
+    text = text.replace("\t", " ")
+
+    # Collapse patterns of newline followed by spaces
+    text = re.sub(r"\n +", "\n", text)
+
+    # Collapse multiple newlines into a single newline
+    text = re.sub(r"\n+", "\n", text)
+
+    # Strip leading and trailing whitespace
+    return text.strip()
+
+
 # TODO(bschoen): Full description
-def open_url_with_users_local_browser_and_get_all_content_as_html(url: str) -> str:
+def open_url_with_users_local_browser_and_get_all_content_as_html(
+    url: str,
+    output_filepath: str = "default_output_filepath_open_url_with_users_local_browser_and_get_all_content_as_html.html",
+) -> str:
     """
     Open url with user's local browser and get all content as html.
 
@@ -86,13 +121,28 @@ def open_url_with_users_local_browser_and_get_all_content_as_html(url: str) -> s
     Together with `search_google_and_return_list_of_results`, these two tools allow
     you to browse the web just like a human would, an incredibly powerful tool.
 
+    The results are returned to you as a string and written to the file `output_filepath`,
+    which is useful to pass onto other tools like `execute_python_code_and_write_python_code_to_file`.
+
     Args:
         url (str): URL to open in the user's browser.
+        output_filepath (str): The filename to save the html content to. This is useful for passing the content to other tools.
     """
     page_content = _get_safari_content(url=url)
 
     # strip down page content
     # TODO(bschoen): Likely want to limit this to max, plus see what we're discarding
     page_content = _extract_text_content(page_content)
+
+    # collapse whitespace, otherwise HTML has insane number of newline and tab tokens, like 50-100 between headings
+    page_content = _collapse_whitespace(page_content)
+
+    # save the content to a file, so claude can do things like parsing it in python
+    # for more complex operations
+    if output_filepath:
+        save_content_to_persistent_file_in_workspace(
+            filename=output_filepath,
+            content=page_content,
+        )
 
     return page_content

@@ -1,6 +1,9 @@
 import contextlib
 import tempfile
 import os
+import pathlib
+
+from local_claude.libs.tools import constants
 
 
 @contextlib.contextmanager
@@ -27,3 +30,15 @@ def temporary_working_directory() -> str:
         finally:
             # change back to the previous working directory
             os.chdir(current_dir)
+
+
+# TODO(bschoen): Consolidate explanation somewhere
+# TODO(bschoen): Make this a context manager?
+def get_current_model_workspace_directory() -> pathlib.Path:
+    """Get the current model workspace directory, creating it if it doesn't exist."""
+
+    directory = pathlib.Path(os.getcwd()) / constants.DEFAULT_MODEL_WORKSPACE_DIRECTORY
+
+    directory.mkdir(exist_ok=True)
+
+    return directory

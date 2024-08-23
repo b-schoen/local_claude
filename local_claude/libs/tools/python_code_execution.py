@@ -1,16 +1,15 @@
-import subprocess
-import pathlib
-
+from local_claude.libs.tools.save_to_workspace_file import (
+    save_content_to_persistent_file_in_workspace,
+)
 from local_claude.libs.tools.bash_code_execution import (
     execute_bash_command,
 )
-
-DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY = pathlib.Path("model_workspace")
 
 
 # TODO(bschoen): We use a non-temporary file because:
 #                - it's easier to debug
 #                - it let's the model give it a persistent name
+# note: the model seems to do better with this than chaining bash etc
 def execute_python_code_and_write_python_code_to_file(
     python_code_to_execute: str,
     filename_for_given_python_code: str,
@@ -40,24 +39,10 @@ def execute_python_code_and_write_python_code_to_file(
         filename_for_given_python_code (str): The filename where the given python code is written before execution
 
     """
-    # TODO(bschoen): Does this specifically matter vs just giving an example
-    #                using the bash tool?
 
-    # note: we do everything in a `model_workspace` directory as a poor man's sandboxing
-    directory = DEFAULT_PYTHON_CODE_GENERATED_FILE_DIRECTORY
-    directory.mkdir(exist_ok=True)
-
-    original_filepath = pathlib.Path(filename_for_given_python_code)
-
-    # ex: `/foo/bar.py` -> `/foo/model_workspace/bar.py`
-    filepath = str(original_filepath).replace(
-        str(original_filepath.stem),
-        str(directory / original_filepath.stem),
+    save_content_to_persistent_file_in_workspace(
+        filename=filename_for_given_python_code,
+        content=python_code_to_execute,
     )
 
-    print(f"Writing python code to file: {filepath}")
-
-    with open(filepath, "wt") as file:
-        file.write(python_code_to_execute)
-
-    return execute_bash_command(command=f"python {filepath}")
+    return execute_bash_command(command=f"python {filename_for_given_python_code}")
