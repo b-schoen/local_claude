@@ -9,6 +9,9 @@ from local_claude.libs.tools.python_code_execution import (
 )
 from local_claude.libs.tools.bash_code_execution import BashCommandResult
 from local_claude.libs import directory_utils
+from local_claude.libs.tools.save_to_workspace_file import (
+    read_file_from_persistent_workspace,
+)
 
 
 # TODO(bschoen): Check error case, timeout, etc
@@ -21,12 +24,6 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
         )
 
         filename_for_given_python_code = "test_file.py"
-
-        # actual filepath used
-        filepath_used_for_python_code = filename_for_given_python_code.replace(
-            "test_file.py",
-            f"{constants.DEFAULT_MODEL_WORKSPACE_DIRECTORY}/test_file.py",
-        )
 
         result_json = execute_python_code_and_write_python_code_to_file(
             python_code_to_execute=python_code_to_execute,
@@ -41,7 +38,8 @@ def test_execute_python_code_and_write_python_code_to_file() -> None:
         assert result.output == "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]\n"
 
         # check `filename_for_given_python_code` now contains `python_code_to_execute`
-        with open(filepath_used_for_python_code, "r") as file:
-            file_contents = file.read()
+        file_contents = read_file_from_persistent_workspace(
+            filename_for_given_python_code
+        )
 
         assert file_contents.strip() == python_code_to_execute.strip()

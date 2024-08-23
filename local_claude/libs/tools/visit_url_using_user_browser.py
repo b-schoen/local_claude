@@ -1,5 +1,6 @@
 import subprocess
 import re
+import json
 
 import bs4
 
@@ -14,116 +15,107 @@ class AppleScriptError(Exception):
 
 def _run_applescript(script: str) -> str:
     """Run an AppleScript and return its output."""
+    try:
+        result = subprocess.run(
+            ["osascript", "-s", "s"],  # '-s s' for strict compilation
+            input=script,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        return result.stdout.strip()
+    except subprocess.CalledProcessError as e:
 
-    # TODO(bschoen): Can we just use `subprocess.run` here?
-    process = subprocess.Popen(
-        ["osascript", "-"],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
+        error_message = (
+            "Note: Sometimes when this fails, need to take safari "
+            "out of full screen and back, then works "
+            "again for a while, TODO(bschoen) to understand why. "
+        )
 
-    stdout, stderr = process.communicate(script)
+        error_message += f"AppleScript Error: {e.stderr.strip()}"
 
-    if stderr:
-        raise AppleScriptError(f"AppleScript Error: {stderr}")
+        if e.stdout:
+            error_message += f"\nOutput: {e.stdout.strip()}"
 
-    return stdout.strip()
+        # printed so we can easily copy into script editor,
+        # as otherwise failing in pytest prefixes every line with `E`
+        print(f"\nScript: {script}")
+
+        raise AppleScriptError(error_message)
 
 
 # note: this is the 'less robust' version produced by claude but is saner to understand
 def _get_safari_content(url: str, max_wait: int = 30, check_interval: int = 1) -> str:
     script = f"""
     on run
-        tell application "Safari"
-            set wasRunning to running
-            activate
-            if (count of windows) = 0 then
-                make new document
-            end if
-            set targetWindow to front window
-            tell targetWindow
-                set newTab to make new tab with properties {{URL:"{url}"}}
-                set current tab to newTab
-            end tell
-            set startTime to current date
-            repeat
-                delay {check_interval}
-                if (do JavaScript "document.readyState" in newTab) is "complete" then exit repeat
-                if ((current date) - startTime) > {max_wait} then
-                    error "Page load timeout"
+        set log_messages to {{}}
+        
+        try
+            tell application "Safari"
+                set log_messages to log_messages & "Safari activated"
+                activate
+                
+                if (count of windows) = 0 then
+                    make new document
+                    set log_messages to log_messages & "New document created"
                 end if
-            end repeat
-            
-            set pageContent to do JavaScript "document.documentElement.outerHTML" in newTab
-            
-            close newTab
-            if not wasRunning then quit
-            
-            do shell script "echo " & quoted form of pageContent
-        end tell
+                
+                set targetWindow to front window
+                set log_messages to log_messages & "Target window set"
+                
+                set currentURL to URL of current tab of targetWindow
+                set log_messages to log_messages & ("Current URL: " & currentURL)
+                
+                -- Try to create a new tab, fall back to using current tab if it fails
+                try
+                    set newTab to make new tab at end of tabs of targetWindow with properties {{URL:"{url}"}}
+                    set log_messages to log_messages & "New tab created"
+                on error createTabError
+                    set log_messages to log_messages & ("Error creating new tab: " & createTabError)
+                    set newTab to current tab of targetWindow
+                    set URL of newTab to "{url}"
+                    set log_messages to log_messages & "Using current tab"
+                end try
+                
+                set current tab of targetWindow to newTab
+                set log_messages to log_messages & "Current tab set"
+                
+                set startTime to current date
+                repeat
+                    delay {check_interval}
+                    set currentURL to URL of newTab
+                    set log_messages to log_messages & ("Current URL: " & currentURL)
+                    if currentURL starts with "{url}" then
+                        try
+                            if (do JavaScript "document.readyState" in newTab) is "complete" then
+                                set log_messages to log_messages & "Page loaded"
+                                exit repeat
+                            end if
+                        on error jsError
+                            set log_messages to log_messages & ("JavaScript error: " & jsError)
+                        end try
+                    end if
+                    if ((current date) - startTime) > {max_wait} then
+                        set log_messages to log_messages & "Page load timeout"
+                        error "Page load timeout"
+                    end if
+                end repeat
+                
+                set pageContent to do JavaScript "document.documentElement.outerHTML" in newTab
+                set log_messages to log_messages & "Content retrieved"
+                
+                return pageContent & "
+" & (log_messages as string)
+            end tell
+        on error errorMessage
+            set log_messages to log_messages & ("Error: " & errorMessage)
+            error errorMessage & "
+" & (log_messages as string)
+        end try
     end run
     """
 
     return _run_applescript(script)
-
-
-def __extract_text_content(html: str) -> str:
-    # Parse the HTML using BeautifulSoup
-    soup = BeautifulSoup(html, "html.parser")
-
-    # Remove script and style elements
-    for script in soup(["script", "style"]):
-        script.decompose()
-
-    # Get text from paragraph elements
-    paragraphs = soup.find_all("p")
-    text_content = []
-
-    for p in paragraphs:
-        # Process links within paragraphs
-        for a in p.find_all("a"):
-            href = a.get("href")
-            if href:
-                a.replace_with(f"{a.get_text()} [{href}]")
-
-        text_content.append(p.get_text())
-
-    # Join the paragraphs with newlines
-    text = "\n\n".join(text_content)
-
-    return text.strip()
-
-
-def __collapse_whitespace(text: str) -> str:
-    """
-    Replace any combination of newlines and tabs with a single newline,
-    collapse multiple spaces into a single space, and strip leading/trailing whitespace.
-
-    Args:
-    text (str): The input text to process.
-
-    Returns:
-    str: The processed text with collapsed whitespaces and standardized newlines.
-    """
-    # Replace any combination of newlines and tabs with a single newline
-    text = re.sub(r"[\n\t]+", "\n", text)
-
-    # Collapse multiple spaces into a single space
-    text = re.sub(r" +", " ", text)
-
-    # Replace tabs with spaces
-    text = text.replace("\t", " ")
-
-    # Collapse patterns of newline followed by spaces
-    text = re.sub(r"\n +", "\n", text)
-
-    # Collapse multiple newlines into a single newline
-    text = re.sub(r"\n+", "\n", text)
-
-    # Strip leading and trailing whitespace
-    return text.strip()
 
 
 def _extract_text_content(html: str) -> str:

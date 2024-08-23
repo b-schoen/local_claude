@@ -6,6 +6,7 @@ import pathlib
 from local_claude.libs.tools import constants
 
 
+# TODO(bschoen): We probably don't want to return this, as it shouldn't directly be used
 @contextlib.contextmanager
 def temporary_working_directory() -> str:
     """
