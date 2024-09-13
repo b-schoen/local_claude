@@ -15,6 +15,7 @@ from local_claude.libs.function_call_handler import FunctionCallHandler
 # import tools
 from local_claude.libs.tools.save_to_workspace_file import (
     save_content_to_persistent_file_in_workspace,
+    read_file_from_persistent_workspace,
 )
 from local_claude.libs.tools.bash_code_execution import execute_bash_command
 from local_claude.libs.tools.python_code_execution import (
@@ -56,6 +57,10 @@ class Defaults:
     For any code you generate, ensure there are inline comments explaining the motivation and
     intuition for all of it, as well as appropriate docstrings and type annotations.
 
+    When making updates to previously generated code, you should instead create a new
+    python file via a call to `execute_python_code_and_write_python_code_to_file` which
+    contains ALL code needed to run.
+
     When iterating on responses, you don't need to include code that hasn't changed since
     previous response.
 
@@ -82,6 +87,7 @@ class Defaults:
     <available_tools>
 
     - `save_content_to_persistent_file_in_workspace`: Save content to a persistent file in the workspace, useful for passing data to other tools
+    - `read_file_from_persistent_workspace`: Read data from file
     - `execute_python_code_and_write_python_code_to_file`: Executes python code and writes it to a file
     - `execute_bash_command`: Executes a bash command and returns the output
     - `search_google_and_return_list_of_results`: Searches google and returns the results
@@ -364,6 +370,7 @@ def main() -> None:
     # create the function call handler
     function_call_handler = FunctionCallHandler(
         functions=[
+            read_file_from_persistent_workspace,
             save_content_to_persistent_file_in_workspace,
             execute_bash_command,
             execute_python_code_and_write_python_code_to_file,
@@ -429,6 +436,7 @@ def main() -> None:
             if is_show_messages_between_tool_use_enabled:
                 st.write(messages)
 
+            # TODO(bschoen): Cache subsequent messages instead of just the first
             # note: the full api is `create` and `stream`
             with st.spinner("Thinking..."):
                 response: anthropic.types.Message = client.messages.create(
@@ -440,6 +448,8 @@ def main() -> None:
                     # needed for caching
                     extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
                 )
+
+            # TODO(bschoen): Show usage and potentially limit tokens
 
             print(f"Response: {response.model_dump_json(indent=2)}")
 
