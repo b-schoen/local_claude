@@ -95,6 +95,9 @@ class ConversationManager:
         Retrieves the list of messages for a given conversation ID by loading the corresponding JSON file.
         """
         filepath = self._CONVERSATIONS_DIR / f"{conversation_id}.json"
+
+        st.write(f"Loading conversation from: {filepath.resolve()}")
+
         return read_json_file(filepath)
 
     def add_conversation_message(
