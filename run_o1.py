@@ -1,141 +1,40 @@
 import streamlit as st
-import anthropic
+import openai
 
 import datetime
-from typing import Iterable
+from typing import Iterable, Any
 import enum
 import json
+import pathlib
 
 import coolname
 import pytz
 
-# import function call handler
-from local_claude.libs.function_call_handler import FunctionCallHandler
-
-# import tools
-from local_claude.libs.tools.save_to_workspace_file import (
-    save_content_to_persistent_file_in_workspace,
-    read_file_from_persistent_workspace,
-)
-from local_claude.libs.tools.bash_code_execution import execute_bash_command
-from local_claude.libs.tools.python_code_execution import (
-    execute_python_code_and_write_python_code_to_file,
-)
-from local_claude.libs.tools.google_search import (
-    search_google_and_return_list_of_results,
-)
-from local_claude.libs.tools.visit_url_using_user_browser import (
-    open_url_with_users_local_browser_and_get_all_content_as_html,
-)
-
 
 class Models(enum.Enum):
-    CLAUDE_SONNET_3_5 = "claude-3-5-sonnet-20240620"
+    O1_PREVIEW = "o1-preview"
+    O1_MINI = "o1-mini"
+    GPT_4O_MINI = "gpt-4o-mini"
 
 
 class Defaults:
-    # sonnet 3.5 is smartest model
-    MODEL = Models.CLAUDE_SONNET_3_5
+    MODEL = Models.GPT_4O_MINI
 
-    # note: 4096 is usual max
+    # max_tokens -> output
+    #
+    # max context: 128,000
+    # recommending at lest 25k reserved for reasoning at first
+    # max_tokens: 32,768
+    #
     MAX_TOKENS = 1024
 
-    # TODO(bschoen): Provide `environment` tags?
-    # TODO(bschoen): A bunch of examples for what's possible with the tools
-    # TODO(bschoen): Chaining them together
-    SYSTEM_PROMPT: str = """
-    You are an AI assistant helping a user. You are provided with a containerized,
-    sandboxed environment in which you can make arbitrary modifications safely. The
-    containerized, sandboxed environment is persistent across calls. You are free
-    to add, create, remove, or modify any files, as your access is already constrained
-    to a sandboxed working directory.
-
-    Note that the availability of these tools does not mean you have to use them in every response.
-    If you are confident you can answer the user's question without using any of the tools, feel free
-    to answer without using the tools.
-
-    For any code you generate, ensure there are inline comments explaining the motivation and
-    intuition for all of it, as well as appropriate docstrings and type annotations.
-
-    When making updates to previously generated code, you should instead create a new
-    python file via a call to `execute_python_code_and_write_python_code_to_file` which
-    contains ALL code needed to run.
-
-    When iterating on responses, you don't need to include code that hasn't changed since
-    previous response.
-
-    Whenever it would make a task easier, feel free to include existing 3rd party libraries
-    or suggest using new programmer tools (ex: some new cli tool, some new desktop application,
-    etc).
-
-    If there is an alternative approach that you believe is more promising in fufilling the user's
-    overall goal, please feel free to suggest it at the end of your response, even if it is in a
-    different direction than the current conversation. You do not need to mention an alternative
-    approach if you believe the current one is the most promising.
-
-    More information about the user is provided between the `user_info` tags here:
-
-    <user_info>
-    
-    The user is a developer with 8 years of experience building various products
-    spanning multiple programming languages and internal tools.
-    
-    </user_info>
-
-    More info about the available tools is provided between the `available_tools` tags here:
-
-    <available_tools>
-
-    - `save_content_to_persistent_file_in_workspace`: Save content to a persistent file in the workspace, useful for passing data to other tools
-    - `read_file_from_persistent_workspace`: Read data from file
-    - `execute_python_code_and_write_python_code_to_file`: Executes python code and writes it to a file
-    - `execute_bash_command`: Executes a bash command and returns the output
-    - `search_google_and_return_list_of_results`: Searches google and returns the results
-    - `open_url_with_users_local_browser_and_get_all_content_as_html`: Opens a URL in the user's local browser and returns the HTML content
-
-    </available_tools>
-
-    Here is a multi step example of:
-    - (1) Getting HTML content of a url via `open_url_with_users_local_browser_and_get_all_content_as_html`
-    - (2) Using python to parse desired information from the HTML content
-
-    <example_multi_step_tool_use>
-
-    html_content = open_url_with_users_local_browser_and_get_all_content_as_html("https://pypi.org/project/anthropic")
-
-    execute_python_code_and_write_python_code_to_file(f'''
-        import 
-
-        html_content
-    ''')
-
-    </example_multi_step_tool_use>
-
-    Here is a multi step example of:
-    - (1) Getting the results from a google search via `search_google_and_return_list_of_results`
-    - (2) Using the links from those results with `open_url_with_users_local_browser_and_get_all_content_as_html` to get more detailed information to more helpfully respond to the user's query
-
-    <example_multi_step_tool_use>
-
-    search_results = search_google_and_return_list_of_results("How does AutoGPT4 work")
-
-    # call `open_url_with_users_local_browser_and_get_all_content_as_html` on the interesting links,
-    # here we're arbitrarily choosing 0 and 3 for this example
-    interesting_links = [search_results[0]["link"], search_results[3]["link"]]
-
-    content_of_interesting_links = [
-        open_url_with_users_local_browser_and_get_all_content_as_html(interesting_link)
-        for interesting_link in interesting_links
-    ]
-
-    # now use `content_of_interesting_links` to help you provide an answer to the user
-
-    </example_multi_step_tool_use>
-
-    """
+    # max_completion_tokens -> total actually generated (output + reasoning)
+    MAX_COMPLETION_TOKENS = 16000
 
 
 type ConversationId = str
+MessageParam = Any  # openai.types.
+MessageContent = Any
 
 
 def generate_conversation_id() -> ConversationId:
@@ -153,67 +52,72 @@ def generate_conversation_id() -> ConversationId:
     return f"{timestamp_string}__{unique_coolname}"
 
 
-# TODO(bschoen): We likely want this to be actually persistent state
-# TODO(bschoen): We likely *later* want to add the ability to "wake up" (i.e. use same docker container etc)
+def read_json_file(filepath: pathlib.Path) -> list[MessageParam]:
+    """
+    Read and return the data from a JSON file.
+    """
+    with filepath.open("r", encoding="utf-8") as file:
+        return json.load(file)
+
+
+def write_json_file(filepath: pathlib.Path, data: list[MessageParam]) -> None:
+    """Write data to a JSON file."""
+
+    with filepath.open("w", encoding="utf-8") as file:
+        json.dump(data, file, ensure_ascii=False, indent=4)
+
+
 class ConversationManager:
     """
-    Handles getting / setting conversations and messages whenever they interact with the `st.session_state` singleton.
+    Handles getting and setting conversations and messages using JSON files in a subdirectory.
 
-    This allows caller to not have to know anything about the singleton usage.
+    Each conversation is stored as a separate JSON file named <conversation-id>.json
+    within the 'conversations' directory.
 
-    We wrap messages in a singleton since streamlit reruns every time.
-
-    Note:
-      - `st.session_state` is just an arbitrary persistent key-value store, see https://docs.streamlit.io/develop/api-reference/caching-and-state/st.session_state
-      - this is the same pattern used in https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps
-
+    This approach replaces the use of Streamlit's session state with persistent storage.
     """
+
+    _CONVERSATIONS_DIR = pathlib.Path("conversations")
 
     def __init__(self) -> None:
 
-        # initialize if not present yet, this way all other functions
-        # can assume there is an initialized `st.session_state.conversations``
-        if "conversations" not in st.session_state:
-
-            conversations: dict[ConversationId, list[anthropic.types.MessageParam]] = {}
-
-            st.session_state.conversations = conversations
+        # Create the conversations directory if it doesn't exist
+        self._CONVERSATIONS_DIR.mkdir(exist_ok=True)
 
     def get_conversation_ids(self) -> list[ConversationId]:
-        return list(st.session_state.conversations.keys())
+        """
+        Returns a list of all conversation IDs by listing JSON files in the conversations directory.
+        """
+        return [filepath.stem for filepath in self._CONVERSATIONS_DIR.glob("*.json")]
 
-    def get_conversation_messages(
-        self,
-        conversation_id: ConversationId,
-    ) -> list[anthropic.types.MessageParam]:
-        return st.session_state.conversations[conversation_id]
+    def get_conversation_messages(self, conversation_id: ConversationId) -> list[MessageParam]:
+        """
+        Retrieves the list of messages for a given conversation ID by loading the corresponding JSON file.
+        """
+        filepath = self._CONVERSATIONS_DIR / f"{conversation_id}.json"
+        return read_json_file(filepath)
 
     def add_conversation_message(
         self,
         conversation_id: ConversationId,
-        message: anthropic.types.MessageParam,
+        message: MessageParam,
     ) -> None:
-        print(f"Adding message to dict: {message}")
-        st.session_state.conversations[conversation_id].append(message)
+        """
+        Adds a new message to the specified conversation and saves it back to the JSON file.
+        """
+        filepath = self._CONVERSATIONS_DIR / f"{conversation_id}.json"
+        messages = read_json_file(filepath)
+        messages.append(message)
+        write_json_file(filepath, messages)
 
     def create_new_conversation(self) -> ConversationId:
+        """
+        Creates a new conversation by generating a unique ID and initializing an empty JSON file.
+        """
         conversation_id = generate_conversation_id()
-
-        st.session_state.conversations[conversation_id] = []
-
+        filepath = self._CONVERSATIONS_DIR / f"{conversation_id}.json"
+        write_json_file(filepath, [])
         return conversation_id
-
-
-MessageContent = (
-    str
-    | Iterable[
-        anthropic.types.TextBlockParam
-        | anthropic.types.ImageBlockParam
-        | anthropic.types.ToolUseBlockParam
-        | anthropic.types.ToolResultBlockParam
-        | anthropic.types.ContentBlock
-    ]
-)
 
 
 def try_load_json_or_default_to_string(json_string: str) -> str:
@@ -225,76 +129,10 @@ def try_load_json_or_default_to_string(json_string: str) -> str:
 
 def display_message_content(message_content: MessageContent) -> None:
 
-    if isinstance(message_content, str):
-        st.markdown(message_content)
-        return None
-
-    # recursively handle list
-    if isinstance(message_content, list):
-        for item in message_content:
-            display_message_content(item)
-        return None
-
-    # each item is
-    # WOW match with copilot is crazy
-    match message_content["type"]:
-        case "text":
-            st.markdown(message_content["text"])
-            return None
-        case "image":
-            st.image(message_content["source"]["data"])
-            return None
-        case "tool_use":
-            st.markdown(f"Tool use: {message_content['id']}")
-            st.markdown(f"```json\n{json.dumps(message_content, indent=2)}\n```")
-            return None
-        case "tool_result":
-            st.markdown(f"Tool result: {message_content['tool_use_id']}")
-
-            # show details for error
-            if message_content["is_error"]:
-
-                # in this case, we know it should be a JSON dict representing a python exception
-                exception_dict = json.loads(message_content["content"])
-                st.code(exception_dict["traceback"])
-
-            # otherwise show content, up to a limit
-            else:
-
-                # TODO(bschoen): Handle when this is just a string
-
-                # if it's a json, show that
-                function_result = try_load_json_or_default_to_string(
-                    message_content["content"]
-                )
-
-                if isinstance(function_result, str):
-
-                    st.code(
-                        function_result[:100].strip()
-                        + "... (only showing up to first 100 characters)"
-                    )
-
-                # otherwise json decode was successful
-                else:
-                    st.markdown(
-                        f"```json\n{json.dumps(function_result, indent=2)}\n```"
-                    )
-
-                    # TODO(bschoen): How to make this more generic?
-                    if "output" in function_result:
-
-                        st.code(function_result["output"])
-
-            return None
-        case "content":
-            st.markdown(f"Content: {message_content['name']}")
-            return None
-        case _:
-            raise ValueError(f"Unexpected item type: {message_content['type']}")
+    st.markdown(message_content)
 
 
-def display_message(message: anthropic.types.MessageParam) -> None:
+def display_message(message: MessageParam) -> None:
     """
 
     Annoyingly, this operates on `MessageParam` instead of `Message`, since `UserMessage`s aren't actually a legitimate
@@ -310,6 +148,12 @@ def display_message(message: anthropic.types.MessageParam) -> None:
 # TODO(bschoen): Should we make all tools read and write from files, like kubeflow?
 def main() -> None:
 
+    # Set Streamlit to wide mode by default
+    st.set_page_config(layout="wide")
+
+    # Inline comment explaining the motivation
+    # This ensures a wider layout for better content display and user experience
+
     st.title("Claude UI at home")
 
     st.markdown(
@@ -320,6 +164,16 @@ def main() -> None:
                 
     Refresh to clear all conversations.
 """
+    )
+
+    # allow selecting model
+    selected_model = st.sidebar.selectbox(
+        "Model",
+        options=[
+            Models.GPT_4O_MINI.value,
+            Models.O1_PREVIEW.value,
+            Models.O1_MINI.value,
+        ],
     )
 
     # initialize conversation manager to handle state
@@ -346,54 +200,9 @@ def main() -> None:
 
     assert selected_conversation_id
 
-    # allow user to select / edit system prompt, and display it to the user
-    st.markdown("### System Prompt")
-
-    # put system prompt inside a collapasible container
-    with st.expander("System Prompt - Expand To Edit"):
-
-        selected_system_prompt = st.text_area(
-            label="System Prompt",
-            value=Defaults.SYSTEM_PROMPT,
-            height=300,
-        )
-
-    # st.markdown(selected_system_prompt)
-    st.markdown("---")
-
     # show the messages in the selected conversation
-    for message in conversation_manager.get_conversation_messages(
-        selected_conversation_id
-    ):
+    for message in conversation_manager.get_conversation_messages(selected_conversation_id):
         display_message(message)
-
-    # create the function call handler
-    function_call_handler = FunctionCallHandler(
-        functions=[
-            read_file_from_persistent_workspace,
-            save_content_to_persistent_file_in_workspace,
-            execute_bash_command,
-            execute_python_code_and_write_python_code_to_file,
-            search_google_and_return_list_of_results,
-            open_url_with_users_local_browser_and_get_all_content_as_html,
-        ]
-    )
-
-    # show settings even if no user input yet
-    is_show_messages_between_tool_use_enabled = st.sidebar.checkbox(
-        "Show messages between tool use (for debugging)"
-    )
-
-    st.sidebar.markdown(
-        "Number of independent iterations of tool use to allow per "
-        "user input. We limit this to avoid execessive actions."
-    )
-    max_iterations = st.sidebar.number_input(
-        "Max iterations without user input",
-        min_value=1,
-        max_value=10,
-        value=10,
-    )
 
     # only run if new user input
     if user_message_content := st.chat_input("What is your message?"):
@@ -403,18 +212,11 @@ def main() -> None:
         # interacts in between each one
         #
         # note: defaults to getting ANTHROPIC_API_KEY from environment
-        client = anthropic.Anthropic()
+        client = openai.OpenAI()
 
-        user_message: anthropic.types.MessageParam = {
+        user_message: MessageParam = {
             "role": "user",
-            "content": [
-                {
-                    "type": "text",
-                    "text": user_message_content,
-                    # use caching (note: applies to whole message + tools + system prompt)
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
+            "content": user_message_content,
         }
 
         # add user message to message history
@@ -427,88 +229,50 @@ def main() -> None:
         display_message(user_message)
 
         # retrieve history to send to client
-        messages = conversation_manager.get_conversation_messages(
-            selected_conversation_id
+        messages = conversation_manager.get_conversation_messages(selected_conversation_id)
+
+        # is_show_messages_between_tool_use_enabled = True
+
+        # if is_show_messages_between_tool_use_enabled:
+        #    st.write(messages)
+
+        # TODO(bschoen): Cache subsequent messages instead of just the first
+        # note: the full api is `create` and `stream`
+        with st.spinner("Thinking..."):
+
+            kwargs = {
+                "messages": messages,
+                "model": selected_model,
+            }
+
+            if selected_model.startswith("o1"):
+                kwargs.update({"max_completion_tokens": Defaults.MAX_COMPLETION_TOKENS})
+            else:
+                kwargs.update({"max_tokens": Defaults.MAX_TOKENS})
+
+            response = client.chat.completions.create(**kwargs)
+
+        # TODO(bschoen): Show usage and potentially limit tokens
+
+        print(f"Response: {response.model_dump_json(indent=2)}")
+
+        # note: using dict representation for consistency with user_message + it's what API expects
+        response_message = {
+            "role": "assistant",
+            "content": response.choices[0].message.content,
+        }
+
+        # add response to conversation
+        conversation_manager.add_conversation_message(
+            selected_conversation_id,
+            response_message,
         )
 
-        for iteration_count in range(max_iterations):
+        # display agent message
+        display_message(response_message)
 
-            if is_show_messages_between_tool_use_enabled:
-                st.write(messages)
-
-            # TODO(bschoen): Cache subsequent messages instead of just the first
-            # note: the full api is `create` and `stream`
-            with st.spinner("Thinking..."):
-                response: anthropic.types.Message = client.messages.create(
-                    messages=messages,
-                    max_tokens=Defaults.MAX_TOKENS,
-                    model=Defaults.MODEL.value,
-                    system=selected_system_prompt,
-                    tools=function_call_handler.get_schema_for_tools_arg(),
-                    # needed for caching
-                    extra_headers={"anthropic-beta": "prompt-caching-2024-07-31"},
-                )
-
-            # TODO(bschoen): Show usage and potentially limit tokens
-
-            print(f"Response: {response.model_dump_json(indent=2)}")
-
-            # note: using dict representation for consistency with user_message + it's what API expects
-            response_message = response.model_dump(include=["role", "content"])
-
-            # display agent message
-            display_message(response_message)
-
-            # add response to message history
-            messages.append(response_message)
-
-            if any(block.type == "tool_use" for block in response.content):
-
-                # collect tool results, as they all need to go in a single message
-                tool_results: anthropic.types.ToolResultBlockParam = []
-
-                # handle tool use
-                for response_block in response.content:
-
-                    if response_block.type == "tool_use":
-
-                        tool_result = function_call_handler.resolve(
-                            tool_call=response_block
-                        )
-
-                        tool_results.append(tool_result)
-
-                    elif response_block.type == "text":
-
-                        print("Got text message.")
-
-                    else:
-                        raise ValueError(
-                            f"Unexpected response block type: {response_block.type} in {response_block}"
-                        )
-
-                tool_result_message: anthropic.types.MessageParam = {
-                    "role": "user",
-                    "content": tool_results,
-                }
-
-                conversation_manager.add_conversation_message(
-                    selected_conversation_id,
-                    tool_result_message,
-                )
-
-                display_message(tool_result_message)
-
-            # if no more tool use, break
-            else:
-
-                print("No more tool use, breaking")
-
-                # return, so we don't show the max iterations warning message when it doesn't apply
-                return None
-
-        # TODO(bschoen): Error for max iterations
-        st.warning("Reached max iterations")
+        # add response to message history
+        messages.append(response_message)
 
 
 if __name__ == "__main__":
